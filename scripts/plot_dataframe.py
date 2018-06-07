@@ -102,7 +102,7 @@ def plot_analyzed_dataframe(args: Namespace) -> None:
             exit()
 
     # Get trades already made from the DB
-    trades = []
+    trades: List[Trade] = []
     if args.db_url:
         engine = create_engine('sqlite:///' + args.db_url)
         persistence.init(_CONF, engine)
