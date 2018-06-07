@@ -10,29 +10,29 @@ Optional Cli parameters
 --timerange: specify what timerange of data to use.
 -l / --live: Live, to download the latest ticker for the pair
 """
+import glob
+import gzip
+import json
 import logging
+import re
 import sys
 from argparse import Namespace
 from os import path
-import glob
-import json
-import re
-from typing import List, Dict
-import gzip
-
-from freqtrade.arguments import Arguments
-from freqtrade import misc, constants
-from pandas import DataFrame
+from typing import List, Dict, Tuple
 
 import dateutil.parser
+from pandas import DataFrame
+
+from freqtrade import misc, constants
+from freqtrade.arguments import Arguments
 
 logger = logging.getLogger('freqtrade')
 
 
-def load_old_file(filename) -> (List[Dict], bool):
+def load_old_file(filename) -> Tuple[List[Dict], bool]:
     if not path.isfile(filename):
         logger.warning("filename %s does not exist", filename)
-        return (None, False)
+        return [], False
     logger.debug('Loading ticker data from file %s', filename)
 
     pairdata = None
@@ -46,7 +46,7 @@ def load_old_file(filename) -> (List[Dict], bool):
         is_zip = False
         with open(filename) as tickerdata:
             pairdata = json.load(tickerdata)
-    return (pairdata, is_zip)
+    return pairdata, is_zip
 
 
 def parse_old_backtest_data(ticker) -> DataFrame:
@@ -92,7 +92,7 @@ def convert_dataframe(frame: DataFrame):
 
 def convert_file(filename: str, filename_new: str) -> None:
     """Converts a file from old format to ccxt format"""
-    (pairdata, is_zip) = load_old_file(filename)
+    pairdata, is_zip = load_old_file(filename)
     if pairdata and type(pairdata) is list:
         if type(pairdata[0]) is list:
             logger.error("pairdata for %s already in new format", filename)
