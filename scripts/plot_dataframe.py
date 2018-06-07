@@ -65,7 +65,6 @@ def plot_analyzed_dataframe(args: Namespace) -> None:
         logger.critical('--pair format must be XXX/YYY')
         exit()
 
-
     # Set timerange to use
     timerange = Arguments.parse_timerange(args.timerange)
 
