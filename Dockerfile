@@ -1,23 +1,24 @@
-FROM python:3.6.5-slim-stretch
+FROM python:3.6-slim-stretch
+
+# Install build deps
+RUN apt-get update && \
+  apt-get install -y --no-install-recommends curl build-essential && \
+  rm -rf /var/lib/apt/lists/*
 
 # Install TA-lib
-RUN apt-get update && apt-get -y install curl build-essential && apt-get clean
 RUN curl -L http://prdownloads.sourceforge.net/ta-lib/ta-lib-0.4.0-src.tar.gz | \
-  tar xzvf - && \
-  cd ta-lib && \
-  ./configure && make && make install && \
+  tar xzvf - && cd ta-lib && \
+  ./configure --prefix=/usr && \
+  make && make install && \
   cd .. && rm -rf ta-lib
-ENV LD_LIBRARY_PATH /usr/local/lib
 
-# Prepare environment
-RUN mkdir /freqtrade
 WORKDIR /freqtrade
 
-# Install dependencies
-COPY requirements.txt /freqtrade/
-RUN pip install -r requirements.txt
-
-# Install and execute
+# Install dependencies and freqtrade
 COPY . /freqtrade/
-RUN pip install -e .
+RUN pip install --no-cache-dir -Ur /freqtrade/requirements.txt && \
+  python setup.py install --optimize=1 && \
+  apt-get remove -y curl build-essential && \
+  apt-get autoremove -y
+
 ENTRYPOINT ["freqtrade"]
