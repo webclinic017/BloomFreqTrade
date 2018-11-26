@@ -70,6 +70,7 @@ hesitate to read the source code and understand the mechanism of this bot.
 Freqtrade provides a Linux/macOS script to install all dependencies and help you to configure the bot.
 
 ```bash
+sudo apt-get install git
 git clone git@github.com:freqtrade/freqtrade.git
 cd freqtrade
 sudo apt-get install make build-essential python3-dev
