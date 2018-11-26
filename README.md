@@ -78,7 +78,7 @@ sudo apt-get install git
 git clone git@github.com:freqtrade/freqtrade.git
 cd freqtrade
 sudo apt-get install make build-essential python3-dev
-sh ./install-talib.sh
+sh ./install_ta-lib.sh
 ./setup.sh --install
 source .env/bin/activate
 pip install -e .
