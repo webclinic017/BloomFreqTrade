@@ -76,6 +76,9 @@ cd freqtrade
 sudo apt-get install make build-essential python3-dev
 sh ./install-talib.sh
 ./setup.sh --install
+source .env/bin/activate
+pip install -e .
+python3.6 ./freqtrade/main.py -c config.json
 ```
 
 _Windows installation is explained in [Installation doc](https://github.com/freqtrade/freqtrade/blob/develop/docs/installation.md)_
