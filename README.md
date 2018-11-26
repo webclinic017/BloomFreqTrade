@@ -71,7 +71,7 @@ Freqtrade provides a Linux/macOS script to install all dependencies and help you
 
 ```bash
 sudo apt-get install git
-git clone git@github.com:freqtrade/freqtrade.git
+git clone git@github.com:MontrealTradingGroup/freqtrade.git
 cd freqtrade
 sudo apt-get install make build-essential python3-dev
 sh ./install_ta-lib.sh
