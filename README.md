@@ -81,6 +81,7 @@ sudo apt-get install make build-essential python3-dev
 sh ./install_ta-lib.sh
 ./setup.sh --install
 source .env/bin/activate
+pip3 install numpy
 pip3 install -e .
 python3.6 ./freqtrade/main.py -c config.json
 ```
