@@ -219,8 +219,9 @@ class Backtesting(object):
                     # Set close_rate to stoploss
                     closerate = trade.stop_loss
                 elif sell.sell_type == (SellType.ROI):
-                    # get entry in min_roi >= to trade duration
-                    roi_entry = max(list(filter(lambda x: trade_dur >= x,
+                    # get next entry in min_roi > to trade duration
+                    # Interface.py skips on trade_duration <= duration
+                    roi_entry = max(list(filter(lambda x: trade_dur > x,
                                                 self.strategy.minimal_roi.keys())))
                     roi = self.strategy.minimal_roi[roi_entry]
 
@@ -393,12 +394,9 @@ class Backtesting(object):
             logger.info("Running backtesting for Strategy %s", strat.get_strategy_name())
             self._set_strategy(strat)
 
-            # need to reprocess data every time to populate signals
-            preprocessed = self.strategy.tickerdata_to_dataframe(data)
-
-            min_date, max_date = optimize.get_timeframe(preprocessed)
-            # Validate dataframe for missing values
-            optimize.validate_backtest_data(preprocessed, min_date, max_date,
+            min_date, max_date = optimize.get_timeframe(data)
+            # Validate dataframe for missing values (mainly at start and end, as fillup is called)
+            optimize.validate_backtest_data(data, min_date, max_date,
                                             constants.TICKER_INTERVAL_MINUTES[self.ticker_interval])
             logger.info(
                 'Measuring data from %s up to %s (%s days)..',
@@ -406,6 +404,8 @@ class Backtesting(object):
                 max_date.isoformat(),
                 (max_date - min_date).days
             )
+            # need to reprocess data every time to populate signals
+            preprocessed = self.strategy.tickerdata_to_dataframe(data)
 
             # Execute backtest and print results
             all_results[self.strategy.get_strategy_name()] = self.backtest(

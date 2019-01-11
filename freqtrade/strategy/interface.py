@@ -67,6 +67,11 @@ class IStrategy(ABC):
     # associated stoploss
     stoploss: float
 
+    # trailing stoploss
+    trailing_stop: bool = False
+    trailing_stop_positive: float
+    trailing_stop_positive_offset: float
+
     # associated ticker interval
     ticker_interval: str
 
@@ -278,7 +283,8 @@ class IStrategy(ABC):
         # evaluate if the stoploss was hit
         if self.stoploss is not None and trade.stop_loss >= current_rate:
             selltype = SellType.STOP_LOSS
-            if trailing_stop:
+            # If Trailing stop (and max-rate did move above open rate)
+            if trailing_stop and trade.open_rate != trade.max_rate:
                 selltype = SellType.TRAILING_STOP_LOSS
                 logger.debug(
                     f"HIT STOP: current price at {current_rate:.6f}, "
@@ -321,7 +327,7 @@ class IStrategy(ABC):
         time_diff = (current_time.timestamp() - trade.open_date.timestamp()) / 60
         for duration, threshold in self.minimal_roi.items():
             if time_diff <= duration:
-                return False
+                continue
             if current_profit > threshold:
                 return True
 
