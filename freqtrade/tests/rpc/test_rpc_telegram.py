@@ -17,6 +17,7 @@ from freqtrade.freqtradebot import FreqtradeBot
 from freqtrade.persistence import Trade
 from freqtrade.rpc import RPCMessageType
 from freqtrade.rpc.telegram import Telegram, authorized_only
+from freqtrade.strategy.interface import SellType
 from freqtrade.state import State
 from freqtrade.tests.conftest import (get_patched_freqtradebot, log_has,
                                       patch_exchange)
@@ -729,13 +730,15 @@ def test_forcesell_handle(default_conf, update, ticker, fee,
         'profit_percent': 0.0611052,
         'stake_currency': 'BTC',
         'fiat_currency': 'USD',
+        'sell_reason': SellType.FORCE_SELL.value
     } == last_msg
 
 
 def test_forcesell_down_handle(default_conf, update, ticker, fee,
                                ticker_sell_down, markets, mocker) -> None:
     patch_coinmarketcap(mocker, value={'price_usd': 15000.0})
-    mocker.patch('freqtrade.fiat_convert.CryptoToFiatConverter._find_price', return_value=15000.0)
+    mocker.patch('freqtrade.rpc.fiat_convert.CryptoToFiatConverter._find_price',
+                 return_value=15000.0)
     rpc_mock = mocker.patch('freqtrade.rpc.telegram.Telegram.send_msg', MagicMock())
     mocker.patch('freqtrade.rpc.telegram.Telegram._init', MagicMock())
     mocker.patch.multiple(
@@ -782,13 +785,15 @@ def test_forcesell_down_handle(default_conf, update, ticker, fee,
         'profit_percent': -0.05478342,
         'stake_currency': 'BTC',
         'fiat_currency': 'USD',
+        'sell_reason': SellType.FORCE_SELL.value
     } == last_msg
 
 
 def test_forcesell_all_handle(default_conf, update, ticker, fee, markets, mocker) -> None:
     patch_coinmarketcap(mocker, value={'price_usd': 15000.0})
     patch_exchange(mocker)
-    mocker.patch('freqtrade.fiat_convert.CryptoToFiatConverter._find_price', return_value=15000.0)
+    mocker.patch('freqtrade.rpc.fiat_convert.CryptoToFiatConverter._find_price',
+                 return_value=15000.0)
     rpc_mock = mocker.patch('freqtrade.rpc.telegram.Telegram.send_msg', MagicMock())
     mocker.patch('freqtrade.rpc.telegram.Telegram._init', MagicMock())
     mocker.patch('freqtrade.exchange.Exchange.get_pair_detail_url', MagicMock())
@@ -827,12 +832,14 @@ def test_forcesell_all_handle(default_conf, update, ticker, fee, markets, mocker
         'profit_percent': -0.00589291,
         'stake_currency': 'BTC',
         'fiat_currency': 'USD',
+        'sell_reason': SellType.FORCE_SELL.value
     } == msg
 
 
 def test_forcesell_handle_invalid(default_conf, update, mocker) -> None:
     patch_coinmarketcap(mocker, value={'price_usd': 15000.0})
-    mocker.patch('freqtrade.fiat_convert.CryptoToFiatConverter._find_price', return_value=15000.0)
+    mocker.patch('freqtrade.rpc.fiat_convert.CryptoToFiatConverter._find_price',
+                 return_value=15000.0)
     msg_mock = MagicMock()
     mocker.patch.multiple(
         'freqtrade.rpc.telegram.Telegram',
@@ -1021,7 +1028,7 @@ def test_whitelist_static(default_conf, update, mocker) -> None:
 
     telegram._whitelist(bot=MagicMock(), update=update)
     assert msg_mock.call_count == 1
-    assert ('Using static whitelist with `4` pairs \n`ETH/BTC, LTC/BTC, XRP/BTC, NEO/BTC`'
+    assert ('Using whitelist `StaticPairList` with 4 pairs\n`ETH/BTC, LTC/BTC, XRP/BTC, NEO/BTC`'
             in msg_mock.call_args_list[0][0][0])
 
 
@@ -1033,14 +1040,17 @@ def test_whitelist_dynamic(default_conf, update, mocker) -> None:
         _init=MagicMock(),
         _send_msg=msg_mock
     )
-    default_conf['dynamic_whitelist'] = 4
+    mocker.patch('freqtrade.exchange.Exchange.exchange_has', MagicMock(return_value=True))
+    default_conf['pairlist'] = {'method': 'VolumePairList',
+                                'config': {'number_assets': 4}
+                                }
     freqtradebot = get_patched_freqtradebot(mocker, default_conf)
 
     telegram = Telegram(freqtradebot)
 
     telegram._whitelist(bot=MagicMock(), update=update)
     assert msg_mock.call_count == 1
-    assert ('Dynamic whitelist with `4` pairs\n`ETH/BTC, LTC/BTC, XRP/BTC, NEO/BTC`'
+    assert ('Using whitelist `VolumePairList` with 4 pairs\n`ETH/BTC, LTC/BTC, XRP/BTC, NEO/BTC`'
             in msg_mock.call_args_list[0][0][0])
 
 
@@ -1127,16 +1137,18 @@ def test_send_msg_sell_notification(default_conf, mocker) -> None:
         'profit_amount': -0.05746268,
         'profit_percent': -0.57405275,
         'stake_currency': 'ETH',
-        'fiat_currency': 'USD'
+        'fiat_currency': 'USD',
+        'sell_reason': SellType.STOP_LOSS.value
     })
     assert msg_mock.call_args[0][0] \
-        == '*Binance:* Selling [KEY/ETH]' \
-           '(https://www.binance.com/tradeDetail.html?symbol=KEY_ETH)\n' \
-           '*Limit:* `0.00003201`\n' \
-           '*Amount:* `1333.33333333`\n' \
-           '*Open Rate:* `0.00007500`\n' \
-           '*Current Rate:* `0.00003201`\n' \
-           '*Profit:* `-57.41%`` (loss: -0.05746268 ETH`` / -24.812 USD)`'
+        == ('*Binance:* Selling [KEY/ETH]'
+            '(https://www.binance.com/tradeDetail.html?symbol=KEY_ETH)\n'
+            '*Limit:* `0.00003201`\n'
+            '*Amount:* `1333.33333333`\n'
+            '*Open Rate:* `0.00007500`\n'
+            '*Current Rate:* `0.00003201`\n'
+            '*Sell Reason:* `stop_loss`\n'
+            '*Profit:* `-57.41%`` (loss: -0.05746268 ETH`` / -24.812 USD)`')
 
     msg_mock.reset_mock()
     telegram.send_msg({
@@ -1152,15 +1164,17 @@ def test_send_msg_sell_notification(default_conf, mocker) -> None:
         'profit_amount': -0.05746268,
         'profit_percent': -0.57405275,
         'stake_currency': 'ETH',
+        'sell_reason': SellType.STOP_LOSS.value
     })
     assert msg_mock.call_args[0][0] \
-        == '*Binance:* Selling [KEY/ETH]' \
-           '(https://www.binance.com/tradeDetail.html?symbol=KEY_ETH)\n' \
-           '*Limit:* `0.00003201`\n' \
-           '*Amount:* `1333.33333333`\n' \
-           '*Open Rate:* `0.00007500`\n' \
-           '*Current Rate:* `0.00003201`\n' \
-           '*Profit:* `-57.41%`'
+        == ('*Binance:* Selling [KEY/ETH]'
+            '(https://www.binance.com/tradeDetail.html?symbol=KEY_ETH)\n'
+            '*Limit:* `0.00003201`\n'
+            '*Amount:* `1333.33333333`\n'
+            '*Open Rate:* `0.00007500`\n'
+            '*Current Rate:* `0.00003201`\n'
+            '*Sell Reason:* `stop_loss`\n'
+            '*Profit:* `-57.41%`')
     # Reset singleton function to avoid random breaks
     telegram._fiat_converter.convert_amount = old_convamount
 
@@ -1278,7 +1292,8 @@ def test_send_msg_sell_notification_no_fiat(default_conf, mocker) -> None:
         'profit_amount': -0.05746268,
         'profit_percent': -0.57405275,
         'stake_currency': 'ETH',
-        'fiat_currency': 'USD'
+        'fiat_currency': 'USD',
+        'sell_reason': SellType.STOP_LOSS.value
     })
     assert msg_mock.call_args[0][0] \
         == '*Binance:* Selling [KEY/ETH]' \
@@ -1287,6 +1302,7 @@ def test_send_msg_sell_notification_no_fiat(default_conf, mocker) -> None:
            '*Amount:* `1333.33333333`\n' \
            '*Open Rate:* `0.00007500`\n' \
            '*Current Rate:* `0.00003201`\n' \
+           '*Sell Reason:* `stop_loss`\n' \
            '*Profit:* `-57.41%`'
 
 

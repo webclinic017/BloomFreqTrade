@@ -14,9 +14,9 @@ from numpy import mean, nan_to_num, NAN
 from pandas import DataFrame
 
 from freqtrade import TemporaryError, DependencyException
-from freqtrade.fiat_convert import CryptoToFiatConverter
 from freqtrade.misc import shorten_date
 from freqtrade.persistence import Trade
+from freqtrade.rpc.fiat_convert import CryptoToFiatConverter
 from freqtrade.state import State
 from freqtrade.strategy.interface import SellType
 
@@ -446,7 +446,8 @@ class RPC(object):
 
     def _rpc_whitelist(self) -> Dict:
         """ Returns the currently active whitelist"""
-        res = {'method': self._freqtrade.config.get('dynamic_whitelist', 0) or 'static',
+        res = {'method': self._freqtrade.pairlists.name,
+               'length': len(self._freqtrade.pairlists.whitelist),
                'whitelist': self._freqtrade.active_pair_whitelist
                }
         return res

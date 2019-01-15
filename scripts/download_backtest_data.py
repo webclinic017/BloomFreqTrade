@@ -9,8 +9,8 @@ import arrow
 from freqtrade import arguments
 from freqtrade.arguments import TimeRange
 from freqtrade.exchange import Exchange
-from freqtrade.optimize import download_backtesting_testdata
-from freqtrade.configuration import set_loggers
+from freqtrade.data.history import download_pair_history
+from freqtrade.configuration import Configuration, set_loggers
 
 import logging
 logging.basicConfig(
@@ -27,7 +27,30 @@ args = arguments.parse_args()
 
 timeframes = args.timeframes
 
-dl_path = Path(DEFAULT_DL_PATH).joinpath(args.exchange)
+if args.config:
+    configuration = Configuration(args)
+    config = configuration._load_config_file(args.config)
+
+    config['stake_currency'] = ''
+    # Ensure we do not use Exchange credentials
+    config['exchange']['key'] = ''
+    config['exchange']['secret'] = ''
+else:
+    config = {'stake_currency': '',
+              'dry_run': True,
+              'exchange': {
+                  'name': args.exchange,
+                  'key': '',
+                  'secret': '',
+                  'pair_whitelist': [],
+                  'ccxt_async_config': {
+                      "enableRateLimit": False
+                  }
+              }
+              }
+
+
+dl_path = Path(DEFAULT_DL_PATH).joinpath(config['exchange']['name'])
 if args.export:
     dl_path = Path(args.export)
 
@@ -52,20 +75,8 @@ if args.days:
 
 print(f'About to download pairs: {PAIRS} to {dl_path}')
 
-
 # Init exchange
-exchange = Exchange({'key': '',
-                     'secret': '',
-                     'stake_currency': '',
-                     'dry_run': True,
-                     'exchange': {
-                         'name': args.exchange,
-                         'pair_whitelist': [],
-                         'ccxt_async_config': {
-                             "enableRateLimit": False
-                         }
-                     }
-                     })
+exchange = Exchange(config)
 pairs_not_available = []
 
 for pair in PAIRS:
@@ -82,10 +93,10 @@ for pair in PAIRS:
             dl_file.unlink()
 
         print(f'downloading pair {pair}, interval {tick_interval}')
-        download_backtesting_testdata(str(dl_path), exchange=exchange,
-                                      pair=pair,
-                                      tick_interval=tick_interval,
-                                      timerange=timerange)
+        download_pair_history(datadir=dl_path, exchange=exchange,
+                              pair=pair,
+                              tick_interval=tick_interval,
+                              timerange=timerange)
 
 
 if pairs_not_available:

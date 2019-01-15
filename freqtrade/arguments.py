@@ -115,7 +115,8 @@ class Arguments(object):
         self.parser.add_argument(
             '--dynamic-whitelist',
             help='dynamically generate and update whitelist'
-                 ' based on 24h BaseVolume (default: %(const)s)',
+                 ' based on 24h BaseVolume (default: %(const)s)'
+                 ' DEPRECATED.',
             dest='dynamic_whitelist',
             const=constants.DYNAMIC_WHITELIST,
             type=int,
@@ -271,7 +272,7 @@ class Arguments(object):
             '-s', '--spaces',
             help='Specify which parameters to hyperopt. Space separate list. \
                   Default: %(default)s',
-            choices=['all', 'buy', 'roi', 'stoploss'],
+            choices=['all', 'buy', 'sell', 'roi', 'stoploss'],
             default='all',
             nargs='+',
             dest='spaces',
@@ -378,6 +379,15 @@ class Arguments(object):
         )
 
         self.parser.add_argument(
+            '-c', '--config',
+            help='specify configuration file, used for additional exchange parameters',
+            dest='config',
+            default=None,
+            type=str,
+            metavar='PATH',
+        )
+
+        self.parser.add_argument(
             '--days',
             help='Download data for number of days',
             dest='days',
@@ -388,7 +398,7 @@ class Arguments(object):
 
         self.parser.add_argument(
             '--exchange',
-            help='Exchange name (default: %(default)s)',
+            help='Exchange name (default: %(default)s). Only valid if no config is provided',
             dest='exchange',
             type=str,
             default='bittrex'

@@ -12,8 +12,8 @@ from telegram.error import NetworkError, TelegramError
 from telegram.ext import CommandHandler, Updater
 
 from freqtrade.__init__ import __version__
-from freqtrade.fiat_convert import CryptoToFiatConverter
 from freqtrade.rpc import RPC, RPCException, RPCMessageType
+from freqtrade.rpc.fiat_convert import CryptoToFiatConverter
 
 logger = logging.getLogger(__name__)
 
@@ -125,9 +125,9 @@ class Telegram(RPC):
             else:
                 msg['stake_amount_fiat'] = 0
 
-            message = "*{exchange}:* Buying [{pair}]({market_url})\n" \
-                      "with limit `{limit:.8f}\n" \
-                      "({stake_amount:.6f} {stake_currency}".format(**msg)
+            message = ("*{exchange}:* Buying [{pair}]({market_url})\n"
+                       "with limit `{limit:.8f}\n"
+                       "({stake_amount:.6f} {stake_currency}").format(**msg)
 
             if msg.get('fiat_currency', None):
                 message += ",{stake_amount_fiat:.3f} {fiat_currency}".format(**msg)
@@ -137,12 +137,13 @@ class Telegram(RPC):
             msg['amount'] = round(msg['amount'], 8)
             msg['profit_percent'] = round(msg['profit_percent'] * 100, 2)
 
-            message = "*{exchange}:* Selling [{pair}]({market_url})\n" \
-                      "*Limit:* `{limit:.8f}`\n" \
-                      "*Amount:* `{amount:.8f}`\n" \
-                      "*Open Rate:* `{open_rate:.8f}`\n" \
-                      "*Current Rate:* `{current_rate:.8f}`\n" \
-                      "*Profit:* `{profit_percent:.2f}%`".format(**msg)
+            message = ("*{exchange}:* Selling [{pair}]({market_url})\n"
+                       "*Limit:* `{limit:.8f}`\n"
+                       "*Amount:* `{amount:.8f}`\n"
+                       "*Open Rate:* `{open_rate:.8f}`\n"
+                       "*Current Rate:* `{current_rate:.8f}`\n"
+                       "*Sell Reason:* `{sell_reason}`\n"
+                       "*Profit:* `{profit_percent:.2f}%`").format(**msg)
 
             # Check if all sell properties are available.
             # This might not be the case if the message origin is triggered by /forcesell
@@ -150,8 +151,8 @@ class Telegram(RPC):
                and self._fiat_converter):
                 msg['profit_fiat'] = self._fiat_converter.convert_amount(
                     msg['profit_amount'], msg['stake_currency'], msg['fiat_currency'])
-                message += '` ({gain}: {profit_amount:.8f} {stake_currency}`' \
-                           '` / {profit_fiat:.3f} {fiat_currency})`'.format(**msg)
+                message += ('` ({gain}: {profit_amount:.8f} {stake_currency}`'
+                            '` / {profit_fiat:.3f} {fiat_currency})`').format(**msg)
 
         elif msg['type'] == RPCMessageType.STATUS_NOTIFICATION:
             message = '*Status:* `{status}`'.format(**msg)
@@ -447,10 +448,8 @@ class Telegram(RPC):
         """
         try:
             whitelist = self._rpc_whitelist()
-            if whitelist['method'] == 'static':
-                message = f"Using static whitelist with `{len(whitelist['whitelist'])}` pairs \n"
-            else:
-                message = f"Dynamic whitelist with `{whitelist['method']}` pairs\n"
+
+            message = f"Using whitelist `{whitelist['method']}` with {whitelist['length']} pairs\n"
             message += f"`{', '.join(whitelist['whitelist'])}`"
 
             logger.debug(message)

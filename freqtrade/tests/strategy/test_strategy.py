@@ -150,6 +150,45 @@ def test_strategy_override_stoploss(caplog):
             ) in caplog.record_tuples
 
 
+def test_strategy_override_trailing_stop(caplog):
+    caplog.set_level(logging.INFO)
+    config = {
+        'strategy': 'DefaultStrategy',
+        'trailing_stop': True
+    }
+    resolver = StrategyResolver(config)
+
+    assert resolver.strategy.trailing_stop
+    assert isinstance(resolver.strategy.trailing_stop, bool)
+    assert ('freqtrade.resolvers.strategy_resolver',
+            logging.INFO,
+            "Override strategy 'trailing_stop' with value in config file: True."
+            ) in caplog.record_tuples
+
+
+def test_strategy_override_trailing_stop_positive(caplog):
+    caplog.set_level(logging.INFO)
+    config = {
+        'strategy': 'DefaultStrategy',
+        'trailing_stop_positive': -0.1,
+        'trailing_stop_positive_offset': -0.2
+
+    }
+    resolver = StrategyResolver(config)
+
+    assert resolver.strategy.trailing_stop_positive == -0.1
+    assert ('freqtrade.resolvers.strategy_resolver',
+            logging.INFO,
+            "Override strategy 'trailing_stop_positive' with value in config file: -0.1."
+            ) in caplog.record_tuples
+
+    assert resolver.strategy.trailing_stop_positive_offset == -0.2
+    assert ('freqtrade.resolvers.strategy_resolver',
+            logging.INFO,
+            "Override strategy 'trailing_stop_positive' with value in config file: -0.1."
+            ) in caplog.record_tuples
+
+
 def test_strategy_override_ticker_interval(caplog):
     caplog.set_level(logging.INFO)
 
@@ -178,8 +217,7 @@ def test_strategy_override_process_only_new_candles(caplog):
     assert resolver.strategy.process_only_new_candles
     assert ('freqtrade.resolvers.strategy_resolver',
             logging.INFO,
-            "Override process_only_new_candles 'process_only_new_candles' "
-            "with value in config file: True."
+            "Override strategy 'process_only_new_candles' with value in config file: True."
             ) in caplog.record_tuples
 
 
@@ -189,7 +227,8 @@ def test_strategy_override_order_types(caplog):
     order_types = {
         'buy': 'market',
         'sell': 'limit',
-        'stoploss': 'limit'
+        'stoploss': 'limit',
+        'stoploss_on_exchange': True,
     }
 
     config = {
@@ -199,13 +238,14 @@ def test_strategy_override_order_types(caplog):
     resolver = StrategyResolver(config)
 
     assert resolver.strategy.order_types
-    for method in ['buy', 'sell', 'stoploss']:
+    for method in ['buy', 'sell', 'stoploss', 'stoploss_on_exchange']:
         assert resolver.strategy.order_types[method] == order_types[method]
 
     assert ('freqtrade.resolvers.strategy_resolver',
             logging.INFO,
             "Override strategy 'order_types' with value in config file:"
-            " {'buy': 'market', 'sell': 'limit', 'stoploss': 'limit'}."
+            " {'buy': 'market', 'sell': 'limit', 'stoploss': 'limit',"
+            " 'stoploss_on_exchange': True}."
             ) in caplog.record_tuples
 
     config = {
@@ -216,6 +256,41 @@ def test_strategy_override_order_types(caplog):
     with pytest.raises(ImportError,
                        match=r"Impossible to load Strategy 'DefaultStrategy'. "
                              r"Order-types mapping is incomplete."):
+        StrategyResolver(config)
+
+
+def test_strategy_override_order_tif(caplog):
+    caplog.set_level(logging.INFO)
+
+    order_time_in_force = {
+        'buy': 'fok',
+        'sell': 'gtc',
+    }
+
+    config = {
+        'strategy': 'DefaultStrategy',
+        'order_time_in_force': order_time_in_force
+    }
+    resolver = StrategyResolver(config)
+
+    assert resolver.strategy.order_time_in_force
+    for method in ['buy', 'sell']:
+        assert resolver.strategy.order_time_in_force[method] == order_time_in_force[method]
+
+    assert ('freqtrade.resolvers.strategy_resolver',
+            logging.INFO,
+            "Override strategy 'order_time_in_force' with value in config file:"
+            " {'buy': 'fok', 'sell': 'gtc'}."
+            ) in caplog.record_tuples
+
+    config = {
+        'strategy': 'DefaultStrategy',
+        'order_time_in_force': {'buy': 'fok'}
+    }
+    # Raise error for invalid configuration
+    with pytest.raises(ImportError,
+                       match=r"Impossible to load Strategy 'DefaultStrategy'. "
+                             r"Order-time-in-force mapping is incomplete."):
         StrategyResolver(config)
 
 
@@ -263,13 +338,13 @@ def test_call_deprecated_function(result, monkeypatch):
     assert resolver.strategy._sell_fun_len == 2
 
     indicator_df = resolver.strategy.advise_indicators(result, metadata=metadata)
-    assert type(indicator_df) is DataFrame
+    assert isinstance(indicator_df, DataFrame)
     assert 'adx' in indicator_df.columns
 
     buydf = resolver.strategy.advise_buy(result, metadata=metadata)
-    assert type(buydf) is DataFrame
+    assert isinstance(buydf, DataFrame)
     assert 'buy' in buydf.columns
 
     selldf = resolver.strategy.advise_sell(result, metadata=metadata)
-    assert type(selldf) is DataFrame
+    assert isinstance(selldf, DataFrame)
     assert 'sell' in selldf

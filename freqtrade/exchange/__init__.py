@@ -7,12 +7,14 @@ from typing import List, Dict, Tuple, Any, Optional
 from datetime import datetime
 from math import floor, ceil
 
+import arrow
 import asyncio
 import ccxt
 import ccxt.async_support as ccxt_async
-import arrow
+from pandas import DataFrame
 
 from freqtrade import constants, OperationalException, DependencyException, TemporaryError
+from freqtrade.data.converter import parse_ticker_dataframe
 
 logger = logging.getLogger(__name__)
 
@@ -64,13 +66,7 @@ def retrier(f):
 
 class Exchange(object):
 
-    # Current selected exchange
-    _api: ccxt.Exchange = None
-    _api_async: ccxt_async.Exchange = None
     _conf: Dict = {}
-
-    # Holds all open sell orders for dry_run
-    _dry_run_open_orders: Dict[str, Any] = {}
 
     def __init__(self, config: dict) -> None:
         """
@@ -87,15 +83,19 @@ class Exchange(object):
         self._pairs_last_refresh_time: Dict[str, int] = {}
 
         # Holds candles
-        self.klines: Dict[str, Any] = {}
+        self._klines: Dict[str, DataFrame] = {}
+
+        # Holds all open sell orders for dry_run
+        self._dry_run_open_orders: Dict[str, Any] = {}
 
         if config['dry_run']:
             logger.info('Instance is running with dry_run enabled')
 
         exchange_config = config['exchange']
-        self._api = self._init_ccxt(exchange_config, ccxt_kwargs=exchange_config.get('ccxt_config'))
-        self._api_async = self._init_ccxt(exchange_config, ccxt_async,
-                                          ccxt_kwargs=exchange_config.get('ccxt_async_config'))
+        self._api: ccxt.Exchange = self._init_ccxt(
+            exchange_config, ccxt_kwargs=exchange_config.get('ccxt_config'))
+        self._api_async: ccxt_async.Exchange = self._init_ccxt(
+            exchange_config, ccxt_async, ccxt_kwargs=exchange_config.get('ccxt_async_config'))
 
         logger.info('Using Exchange "%s"', self.name)
 
@@ -103,6 +103,7 @@ class Exchange(object):
         # Check if all pairs are available
         self.validate_pairs(config['exchange']['pair_whitelist'])
         self.validate_ordertypes(config.get('order_types', {}))
+        self.validate_order_time_in_force(config.get('order_time_in_force', {}))
         if config.get('ticker_interval'):
             # Check if timeframe is available
             self.validate_timeframes(config['ticker_interval'])
@@ -128,12 +129,12 @@ class Exchange(object):
             raise OperationalException(f'Exchange {name} is not supported')
 
         ex_config = {
-                'apiKey': exchange_config.get('key'),
-                'secret': exchange_config.get('secret'),
-                'password': exchange_config.get('password'),
-                'uid': exchange_config.get('uid', ''),
-                'enableRateLimit': exchange_config.get('ccxt_rate_limit', True)
-            }
+            'apiKey': exchange_config.get('key'),
+            'secret': exchange_config.get('secret'),
+            'password': exchange_config.get('password'),
+            'uid': exchange_config.get('uid', ''),
+            'enableRateLimit': exchange_config.get('ccxt_rate_limit', True)
+        }
         if ccxt_kwargs:
             logger.info('Applying additional ccxt config: %s', ccxt_kwargs)
             ex_config.update(ccxt_kwargs)
@@ -156,6 +157,12 @@ class Exchange(object):
     def id(self) -> str:
         """exchange ccxt id"""
         return self._api.id
+
+    def klines(self, pair: str, copy=True) -> DataFrame:
+        if pair in self._klines:
+            return self._klines[pair].copy() if copy else self._klines[pair]
+        else:
+            return None
 
     def set_sandbox(self, api, exchange_config: dict, name: str):
         if exchange_config.get('sandbox'):
@@ -207,7 +214,8 @@ class Exchange(object):
                     f'Pair {pair} not compatible with stake_currency: {stake_cur}')
             if self.markets and pair not in self.markets:
                 raise OperationalException(
-                    f'Pair {pair} is not available at {self.name}')
+                    f'Pair {pair} is not available at {self.name}'
+                    f'Please remove {pair} from your whitelist.')
 
     def validate_timeframes(self, timeframe: List[str]) -> None:
         """
@@ -226,6 +234,21 @@ class Exchange(object):
             if not self.exchange_has('createMarketOrder'):
                 raise OperationalException(
                     f'Exchange {self.name} does not support market orders.')
+
+        if order_types.get('stoploss_on_exchange'):
+            if self.name is not 'Binance':
+                raise OperationalException(
+                    'On exchange stoploss is not supported for %s.' % self.name
+                )
+
+    def validate_order_time_in_force(self, order_time_in_force: Dict) -> None:
+        """
+        Checks if order time in force configured in strategy/config are supported
+        """
+        if any(v != 'gtc' for k, v in order_time_in_force.items()):
+            if self.name is not 'Binance':
+                raise OperationalException(
+                    f'Time in force policies are not supporetd for  {self.name} yet.')
 
     def exchange_has(self, endpoint: str) -> bool:
         """
@@ -258,7 +281,8 @@ class Exchange(object):
             price = ceil(big_price) / pow(10, symbol_prec)
         return price
 
-    def buy(self, pair: str, ordertype: str, amount: float, rate: float) -> Dict:
+    def buy(self, pair: str, ordertype: str, amount: float,
+            rate: float, time_in_force) -> Dict:
         if self._conf['dry_run']:
             order_id = f'dry_run_buy_{randint(0, 10**6)}'
             self._dry_run_open_orders[order_id] = {
@@ -279,7 +303,12 @@ class Exchange(object):
             amount = self.symbol_amount_prec(pair, amount)
             rate = self.symbol_price_prec(pair, rate) if ordertype != 'market' else None
 
-            return self._api.create_order(pair, ordertype, 'buy', amount, rate)
+            if time_in_force == 'gtc':
+                return self._api.create_order(pair, ordertype, 'buy', amount, rate)
+            else:
+                return self._api.create_order(pair, ordertype, 'buy',
+                                              amount, rate, {'timeInForce': time_in_force})
+
         except ccxt.InsufficientFunds as e:
             raise DependencyException(
                 f'Insufficient funds to create limit buy order on market {pair}.'
@@ -296,7 +325,8 @@ class Exchange(object):
         except ccxt.BaseError as e:
             raise OperationalException(e)
 
-    def sell(self, pair: str, ordertype: str, amount: float, rate: float) -> Dict:
+    def sell(self, pair: str, ordertype: str, amount: float,
+             rate: float, time_in_force='gtc') -> Dict:
         if self._conf['dry_run']:
             order_id = f'dry_run_sell_{randint(0, 10**6)}'
             self._dry_run_open_orders[order_id] = {
@@ -316,7 +346,12 @@ class Exchange(object):
             amount = self.symbol_amount_prec(pair, amount)
             rate = self.symbol_price_prec(pair, rate) if ordertype != 'market' else None
 
-            return self._api.create_order(pair, ordertype, 'sell', amount, rate)
+            if time_in_force == 'gtc':
+                return self._api.create_order(pair, ordertype, 'sell', amount, rate)
+            else:
+                return self._api.create_order(pair, ordertype, 'sell',
+                                              amount, rate, {'timeInForce': time_in_force})
+
         except ccxt.InsufficientFunds as e:
             raise DependencyException(
                 f'Insufficient funds to create limit sell order on market {pair}.'
@@ -330,6 +365,61 @@ class Exchange(object):
         except (ccxt.NetworkError, ccxt.ExchangeError) as e:
             raise TemporaryError(
                 f'Could not place sell order due to {e.__class__.__name__}. Message: {e}')
+        except ccxt.BaseError as e:
+            raise OperationalException(e)
+
+    def stoploss_limit(self, pair: str, amount: float, stop_price: float, rate: float) -> Dict:
+        """
+        creates a stoploss limit order.
+        NOTICE: it is not supported by all exchanges. only binance is tested for now.
+        """
+
+        # Set the precision for amount and price(rate) as accepted by the exchange
+        amount = self.symbol_amount_prec(pair, amount)
+        rate = self.symbol_price_prec(pair, rate)
+        stop_price = self.symbol_price_prec(pair, stop_price)
+
+        # Ensure rate is less than stop price
+        if stop_price <= rate:
+            raise OperationalException(
+                'In stoploss limit order, stop price should be more than limit price')
+
+        if self._conf['dry_run']:
+            order_id = f'dry_run_buy_{randint(0, 10**6)}'
+            self._dry_run_open_orders[order_id] = {
+                'info': {},
+                'id': order_id,
+                'pair': pair,
+                'price': stop_price,
+                'amount': amount,
+                'type': 'stop_loss_limit',
+                'side': 'sell',
+                'remaining': amount,
+                'datetime': arrow.utcnow().isoformat(),
+                'status': 'open',
+                'fee': None
+            }
+            return self._dry_run_open_orders[order_id]
+
+        try:
+            return self._api.create_order(pair, 'stop_loss_limit', 'sell',
+                                          amount, rate, {'stopPrice': stop_price})
+
+        except ccxt.InsufficientFunds as e:
+            raise DependencyException(
+                f'Insufficient funds to place stoploss limit order on market {pair}. '
+                f'Tried to put a stoploss amount {amount} with '
+                f'stop {stop_price} and limit {rate} (total {rate*amount}).'
+                f'Message: {e}')
+        except ccxt.InvalidOrder as e:
+            raise DependencyException(
+                f'Could not place stoploss limit order on market {pair}.'
+                f'Tried to place stoploss amount {amount} with '
+                f'stop {stop_price} and limit {rate} (total {rate*amount}).'
+                f'Message: {e}')
+        except (ccxt.NetworkError, ccxt.ExchangeError) as e:
+            raise TemporaryError(
+                f'Could not place stoploss limit order due to {e.__class__.__name__}. Message: {e}')
         except ccxt.BaseError as e:
             raise OperationalException(e)
 
@@ -429,9 +519,9 @@ class Exchange(object):
 
         # Combine tickers
         data: List = []
-        for tick in tickers:
-            if tick[0] == pair:
-                data.extend(tick[1])
+        for p, ticker in tickers:
+            if p == pair:
+                data.extend(ticker)
         # Sort data again after extending the result - above calls return in "async order" order
         data = sorted(data, key=lambda x: x[0])
         logger.info("downloaded %s with length %s.", pair, len(data))
@@ -439,7 +529,7 @@ class Exchange(object):
 
     def refresh_tickers(self, pair_list: List[str], ticker_interval: str) -> None:
         """
-        Refresh tickers asyncronously and return the result.
+        Refresh tickers asyncronously and set `_klines` of this object with the result
         """
         logger.debug("Refreshing klines for %d pairs", len(pair_list))
         asyncio.get_event_loop().run_until_complete(
@@ -448,9 +538,27 @@ class Exchange(object):
     async def async_get_candles_history(self, pairs: List[str],
                                         tick_interval: str) -> List[Tuple[str, List]]:
         """Download ohlcv history for pair-list asyncronously """
-        input_coroutines = [self._async_get_candle_history(
-            symbol, tick_interval) for symbol in pairs]
+        # Calculating ticker interval in second
+        interval_in_sec = constants.TICKER_INTERVAL_MINUTES[tick_interval] * 60
+        input_coroutines = []
+
+        # Gather corotines to run
+        for pair in pairs:
+            if not (self._pairs_last_refresh_time.get(pair, 0) + interval_in_sec >=
+                    arrow.utcnow().timestamp and pair in self._klines):
+                input_coroutines.append(self._async_get_candle_history(pair, tick_interval))
+            else:
+                logger.debug("Using cached klines data for %s ...", pair)
+
         tickers = await asyncio.gather(*input_coroutines, return_exceptions=True)
+
+        # handle caching
+        for pair, ticks in tickers:
+            # keeping last candle time as last refreshed time of the pair
+            if ticks:
+                self._pairs_last_refresh_time[pair] = ticks[-1][0] // 1000
+            # keeping parsed dataframe in cache
+            self._klines[pair] = parse_ticker_dataframe(ticks, tick_interval, fill_missing=True)
         return tickers
 
     @retrier_async
@@ -460,20 +568,8 @@ class Exchange(object):
             # fetch ohlcv asynchronously
             logger.debug("fetching %s since %s ...", pair, since_ms)
 
-            # Calculating ticker interval in second
-            interval_in_sec = constants.TICKER_INTERVAL_MINUTES[tick_interval] * 60
-
-            # If (last update time) + (interval in second) is greater or equal than now
-            # that means we don't have to hit the API as there is no new candle
-            # so we fetch it from local cache
-            if (not since_ms and
-                    self._pairs_last_refresh_time.get(pair, 0) + interval_in_sec >=
-                    arrow.utcnow().timestamp):
-                data = self.klines[pair]
-                logger.debug("Using cached klines data for %s ...", pair)
-            else:
-                data = await self._api_async.fetch_ohlcv(pair, timeframe=tick_interval,
-                                                         since=since_ms)
+            data = await self._api_async.fetch_ohlcv(pair, timeframe=tick_interval,
+                                                     since=since_ms)
 
             # Because some exchange sort Tickers ASC and other DESC.
             # Ex: Bittrex returns a list of tickers ASC (oldest first, newest last)
@@ -481,13 +577,6 @@ class Exchange(object):
             # Only sort if necessary to save computing time
             if data and data[0][0] > data[-1][0]:
                 data = sorted(data, key=lambda x: x[0])
-
-            # keeping last candle time as last refreshed time of the pair
-            if data:
-                self._pairs_last_refresh_time[pair] = data[-1][0] // 1000
-
-            # keeping candles in cache
-            self.klines[pair] = data
 
             logger.debug("done fetching %s ...", pair)
             return pair, data

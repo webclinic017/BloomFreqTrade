@@ -7,7 +7,7 @@ from pandas import DataFrame
 # Add your lib to import here
 import talib.abstract as ta
 import freqtrade.vendor.qtpylib.indicators as qtpylib
-import numpy # noqa
+import numpy  # noqa
 
 
 # This class is a sample. Feel free to customize it.
@@ -42,6 +42,11 @@ class TestStrategy(IStrategy):
     # This attribute will be overridden if the config file contains "stoploss"
     stoploss = -0.10
 
+    # trailing stoploss
+    trailing_stop = False
+    trailing_stop_positive = 0.01
+    trailing_stop_positive_offset = None  # Disabled / not configured
+
     # Optimal ticker interval for the strategy
     ticker_interval = '5m'
 
@@ -52,7 +57,14 @@ class TestStrategy(IStrategy):
     order_types = {
         'buy': 'limit',
         'sell': 'limit',
-        'stoploss': 'market'
+        'stoploss': 'market',
+        'stoploss_on_exchange': False
+    }
+
+    # Optional order time in force
+    order_time_in_force = {
+        'buy': 'gtc',
+        'sell': 'gtc'
     }
 
     def populate_indicators(self, dataframe: DataFrame, metadata: dict) -> DataFrame:

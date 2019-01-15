@@ -110,19 +110,20 @@ class Configuration(object):
 
         # Add dynamic_whitelist if found
         if 'dynamic_whitelist' in self.args and self.args.dynamic_whitelist:
-            config.update({'dynamic_whitelist': self.args.dynamic_whitelist})
-            logger.info(
-                'Parameter --dynamic-whitelist detected. '
-                'Using dynamically generated whitelist. '
+            # Update to volumePairList (the previous default)
+            config['pairlist'] = {'method': 'VolumePairList',
+                                  'config': {'number_assets': self.args.dynamic_whitelist}
+                                  }
+            logger.warning(
+                'Parameter --dynamic-whitelist has been deprecated, '
+                'and will be completely replaced by the whitelist dict in the future. '
+                'For now: using dynamically generated whitelist based on VolumePairList. '
                 '(not applicable with Backtesting and Hyperopt)'
             )
 
         if self.args.db_url and self.args.db_url != constants.DEFAULT_DB_PROD_URL:
             config.update({'db_url': self.args.db_url})
             logger.info('Parameter --db-url detected ...')
-        else:
-            # Set default here
-            config.update({'db_url': constants.DEFAULT_DB_PROD_URL})
 
         if config.get('dry_run', False):
             logger.info('Dry run is enabled')
@@ -148,13 +149,16 @@ class Configuration(object):
 
         return config
 
-    def _create_default_datadir(self, config: Dict[str, Any]) -> str:
-        exchange_name = config.get('exchange', {}).get('name').lower()
-        default_path = os.path.join('user_data', 'data', exchange_name)
-        if not os.path.isdir(default_path):
-            os.makedirs(default_path)
-            logger.info(f'Created data directory: {default_path}')
-        return default_path
+    def _create_datadir(self, config: Dict[str, Any], datadir: Optional[str] = None) -> str:
+        if not datadir:
+            # set datadir
+            exchange_name = config.get('exchange', {}).get('name').lower()
+            datadir = os.path.join('user_data', 'data', exchange_name)
+
+        if not os.path.isdir(datadir):
+            os.makedirs(datadir)
+            logger.info(f'Created data directory: {datadir}')
+        return datadir
 
     def _load_backtesting_config(self, config: Dict[str, Any]) -> Dict[str, Any]:
         """
@@ -194,9 +198,9 @@ class Configuration(object):
 
         # If --datadir is used we add it to the configuration
         if 'datadir' in self.args and self.args.datadir:
-            config.update({'datadir': self.args.datadir})
+            config.update({'datadir': self._create_datadir(config, self.args.datadir)})
         else:
-            config.update({'datadir': self._create_default_datadir(config)})
+            config.update({'datadir': self._create_datadir(config, None)})
         logger.info('Using data folder: %s ...', config.get('datadir'))
 
         # If -r/--refresh-pairs-cached is used we add it to the configuration
@@ -275,7 +279,7 @@ class Configuration(object):
         :return: Returns the config if valid, otherwise throw an exception
         """
         try:
-            validate(conf, constants.CONF_SCHEMA)
+            validate(conf, constants.CONF_SCHEMA, Draft4Validator)
             return conf
         except ValidationError as exception:
             logger.critical(

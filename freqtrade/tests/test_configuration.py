@@ -6,7 +6,7 @@ import logging
 from unittest.mock import MagicMock
 
 import pytest
-from jsonschema import validate, ValidationError
+from jsonschema import validate, ValidationError, Draft4Validator
 
 from freqtrade import constants
 from freqtrade import OperationalException
@@ -73,7 +73,6 @@ def test_load_config_max_open_trades_minus_one(default_conf, mocker, caplog) -> 
     args = Arguments([], '').get_parsed_arg()
     configuration = Configuration(args)
     validated_conf = configuration.load_config()
-    print(validated_conf)
 
     assert validated_conf['max_open_trades'] > 999999999
     assert validated_conf['max_open_trades'] == float('inf')
@@ -102,7 +101,7 @@ def test_load_config(default_conf, mocker) -> None:
 
     assert validated_conf.get('strategy') == 'DefaultStrategy'
     assert validated_conf.get('strategy_path') is None
-    assert 'dynamic_whitelist' not in validated_conf
+    assert 'edge' not in validated_conf
 
 
 def test_load_config_with_params(default_conf, mocker) -> None:
@@ -119,11 +118,49 @@ def test_load_config_with_params(default_conf, mocker) -> None:
     configuration = Configuration(args)
     validated_conf = configuration.load_config()
 
-    assert validated_conf.get('dynamic_whitelist') == 10
+    assert validated_conf.get('pairlist', {}).get('method') == 'VolumePairList'
+    assert validated_conf.get('pairlist', {}).get('config').get('number_assets') == 10
     assert validated_conf.get('strategy') == 'TestStrategy'
     assert validated_conf.get('strategy_path') == '/some/path'
     assert validated_conf.get('db_url') == 'sqlite:///someurl'
 
+    # Test conf provided db_url prod
+    conf = default_conf.copy()
+    conf["dry_run"] = False
+    conf["db_url"] = "sqlite:///path/to/db.sqlite"
+    mocker.patch('freqtrade.configuration.open', mocker.mock_open(
+        read_data=json.dumps(conf)
+    ))
+
+    arglist = [
+        '--strategy', 'TestStrategy',
+        '--strategy-path', '/some/path'
+    ]
+    args = Arguments(arglist, '').get_parsed_arg()
+
+    configuration = Configuration(args)
+    validated_conf = configuration.load_config()
+    assert validated_conf.get('db_url') == "sqlite:///path/to/db.sqlite"
+
+    # Test conf provided db_url dry_run
+    conf = default_conf.copy()
+    conf["dry_run"] = True
+    conf["db_url"] = "sqlite:///path/to/db.sqlite"
+    mocker.patch('freqtrade.configuration.open', mocker.mock_open(
+        read_data=json.dumps(conf)
+    ))
+
+    arglist = [
+        '--strategy', 'TestStrategy',
+        '--strategy-path', '/some/path'
+    ]
+    args = Arguments(arglist, '').get_parsed_arg()
+
+    configuration = Configuration(args)
+    validated_conf = configuration.load_config()
+    assert validated_conf.get('db_url') == "sqlite:///path/to/db.sqlite"
+
+    # Test args provided db_url prod
     conf = default_conf.copy()
     conf["dry_run"] = False
     del conf["db_url"]
@@ -132,7 +169,6 @@ def test_load_config_with_params(default_conf, mocker) -> None:
     ))
 
     arglist = [
-        '--dynamic-whitelist', '10',
         '--strategy', 'TestStrategy',
         '--strategy-path', '/some/path'
     ]
@@ -142,7 +178,7 @@ def test_load_config_with_params(default_conf, mocker) -> None:
     validated_conf = configuration.load_config()
     assert validated_conf.get('db_url') == DEFAULT_DB_PROD_URL
 
-    # Test dry=run with ProdURL
+    # Test args provided db_url dry_run
     conf = default_conf.copy()
     conf["dry_run"] = True
     conf["db_url"] = DEFAULT_DB_PROD_URL
@@ -151,7 +187,6 @@ def test_load_config_with_params(default_conf, mocker) -> None:
     ))
 
     arglist = [
-        '--dynamic-whitelist', '10',
         '--strategy', 'TestStrategy',
         '--strategy-path', '/some/path'
     ]
@@ -194,8 +229,9 @@ def test_show_info(default_conf, mocker, caplog) -> None:
     configuration.get_config()
 
     assert log_has(
-        'Parameter --dynamic-whitelist detected. '
-        'Using dynamically generated whitelist. '
+        'Parameter --dynamic-whitelist has been deprecated, '
+        'and will be completely replaced by the whitelist dict in the future. '
+        'For now: using dynamically generated whitelist based on VolumePairList. '
         '(not applicable with Backtesting and Hyperopt)',
         caplog.record_tuples
     )
@@ -247,6 +283,7 @@ def test_setup_configuration_with_arguments(mocker, default_conf, caplog) -> Non
     mocker.patch('freqtrade.configuration.open', mocker.mock_open(
         read_data=json.dumps(default_conf)
     ))
+    mocker.patch('freqtrade.configuration.Configuration._create_datadir', lambda s, c, x: x)
 
     arglist = [
         '--config', 'config.json',
@@ -486,4 +523,14 @@ def test_load_config_warn_forcebuy(default_conf, mocker, caplog) -> None:
 
 
 def test_validate_default_conf(default_conf) -> None:
-    validate(default_conf, constants.CONF_SCHEMA)
+    validate(default_conf, constants.CONF_SCHEMA, Draft4Validator)
+
+
+def test__create_datadir(mocker, default_conf, caplog) -> None:
+    mocker.patch('os.path.isdir', MagicMock(return_value=False))
+    md = MagicMock()
+    mocker.patch('os.makedirs', md)
+    cfg = Configuration(Namespace())
+    cfg._create_datadir(default_conf, '/foo/bar')
+    assert md.call_args[0][0] == "/foo/bar"
+    assert log_has('Created data directory: /foo/bar', caplog.record_tuples)

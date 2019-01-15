@@ -62,7 +62,7 @@ def test_init_dryrun_db(default_conf, mocker):
 
 
 @pytest.mark.usefixtures("init_persistence")
-def test_update_with_bittrex(limit_buy_order, limit_sell_order, fee):
+def test_update_with_bittrex(limit_buy_order, limit_sell_order, fee, caplog):
     """
     On this test we will buy and sell a crypto currency.
 
@@ -91,6 +91,7 @@ def test_update_with_bittrex(limit_buy_order, limit_sell_order, fee):
     """
 
     trade = Trade(
+        id=2,
         pair='ETH/BTC',
         stake_amount=0.001,
         fee_open=fee.return_value,
@@ -108,13 +109,53 @@ def test_update_with_bittrex(limit_buy_order, limit_sell_order, fee):
     assert trade.open_rate == 0.00001099
     assert trade.close_profit is None
     assert trade.close_date is None
+    assert log_has("LIMIT_BUY has been fulfilled for Trade(id=2, "
+                   "pair=ETH/BTC, amount=90.99181073, open_rate=0.00001099, open_since=closed).",
+                   caplog.record_tuples)
 
+    caplog.clear()
     trade.open_order_id = 'something'
     trade.update(limit_sell_order)
     assert trade.open_order_id is None
     assert trade.close_rate == 0.00001173
     assert trade.close_profit == 0.06201058
     assert trade.close_date is not None
+    assert log_has("LIMIT_SELL has been fulfilled for Trade(id=2, "
+                   "pair=ETH/BTC, amount=90.99181073, open_rate=0.00001099, open_since=closed).",
+                   caplog.record_tuples)
+
+
+@pytest.mark.usefixtures("init_persistence")
+def test_update_market_order(market_buy_order, market_sell_order, fee, caplog):
+    trade = Trade(
+        id=1,
+        pair='ETH/BTC',
+        stake_amount=0.001,
+        fee_open=fee.return_value,
+        fee_close=fee.return_value,
+        exchange='bittrex',
+    )
+
+    trade.open_order_id = 'something'
+    trade.update(market_buy_order)
+    assert trade.open_order_id is None
+    assert trade.open_rate == 0.00004099
+    assert trade.close_profit is None
+    assert trade.close_date is None
+    assert log_has("MARKET_BUY has been fulfilled for Trade(id=1, "
+                   "pair=ETH/BTC, amount=91.99181073, open_rate=0.00004099, open_since=closed).",
+                   caplog.record_tuples)
+
+    caplog.clear()
+    trade.open_order_id = 'something'
+    trade.update(market_sell_order)
+    assert trade.open_order_id is None
+    assert trade.close_rate == 0.00004173
+    assert trade.close_profit == 0.01297561
+    assert trade.close_date is not None
+    assert log_has("MARKET_SELL has been fulfilled for Trade(id=1, "
+                   "pair=ETH/BTC, amount=91.99181073, open_rate=0.00004099, open_since=closed).",
+                   caplog.record_tuples)
 
 
 @pytest.mark.usefixtures("init_persistence")
@@ -426,6 +467,7 @@ def test_migrate_new(mocker, default_conf, fee, caplog):
                                 max_rate FLOAT,
                                 sell_reason VARCHAR,
                                 strategy VARCHAR,
+                                ticker_interval INTEGER,
                                 PRIMARY KEY (id),
                                 CHECK (is_open IN (0, 1))
                                 );"""
@@ -445,6 +487,8 @@ def test_migrate_new(mocker, default_conf, fee, caplog):
 
     # Create table using the old format
     engine.execute(create_table_old)
+    engine.execute("create index ix_trades_is_open on trades(is_open)")
+    engine.execute("create index ix_trades_pair on trades(pair)")
     engine.execute(insert_table_old)
 
     # fake previous backup
@@ -471,6 +515,7 @@ def test_migrate_new(mocker, default_conf, fee, caplog):
     assert trade.sell_reason is None
     assert trade.strategy is None
     assert trade.ticker_interval is None
+    assert trade.stoploss_order_id is None
     assert log_has("trying trades_bak1", caplog.record_tuples)
     assert log_has("trying trades_bak2", caplog.record_tuples)
     assert log_has("Running database migration - backup available as trades_bak2",
