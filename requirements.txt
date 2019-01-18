@@ -15,6 +15,7 @@ numpy==1.15.4
 TA-Lib==0.4.17
 tabulate==0.8.2
 coinmarketcap==5.0.3
+python-rapidjson
 
 # Required for hyperopt
 scikit-optimize==0.5.2
