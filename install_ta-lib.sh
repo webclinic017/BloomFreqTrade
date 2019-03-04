@@ -5,4 +5,3 @@ else
   echo "TA-lib already installed, skipping download and build."
   cd ta-lib && sudo make install && cd ..
 fi
-pip3 install numpy
