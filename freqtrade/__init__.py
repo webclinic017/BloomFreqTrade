@@ -1,10 +1,5 @@
 """ FreqTrade bot """
-<<<<<<< HEAD
 __version__ = '0.17.3'
-=======
-__version__ = '0.18.1-dev'
->>>>>>> 401de778114f0089eb0d394541efc5c3ea0eda82
-
 
 class DependencyException(BaseException):
     """
